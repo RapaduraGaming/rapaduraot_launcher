@@ -7,13 +7,19 @@ import (
 	_ "embed"
 	"image"
 	"image/png"
+	"os"
+	"path/filepath"
 	"unsafe"
 
 	"github.com/gonutz/w32/v2"
+	"github.com/gonutz/wui/v2"
 )
 
 //go:embed assets/logo.png
 var logoBytes []byte
+
+//go:embed assets/icon.ico
+var iconBytes []byte
 
 // Tibia-inspired dark color palette (COLORREF = 0x00BBGGRR).
 var (
@@ -43,6 +49,20 @@ func initUI(hwnd w32.HWND) {
 	if err == nil {
 		logoBitmap, logoWidth, logoHeight = imageToHBITMAP(img)
 	}
+}
+
+// LoadEmbeddedIcon writes the embedded icon to a temp file and returns a
+// wui.Icon. The caller should not delete the file; it is cleaned up on exit.
+func LoadEmbeddedIcon() *wui.Icon {
+	tmp := filepath.Join(os.TempDir(), "rapaduraot-launcher.ico")
+	if os.WriteFile(tmp, iconBytes, 0600) != nil {
+		return nil
+	}
+	icon, err := wui.NewIconFromFile(tmp)
+	if err != nil {
+		return nil
+	}
+	return icon
 }
 
 func destroyUI() {

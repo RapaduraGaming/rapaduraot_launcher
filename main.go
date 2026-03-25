@@ -52,7 +52,9 @@ func main() {
 	win.SetHasMaxButton(false)
 	win.SetFont(fonts)
 
-	if icon, err := wui.NewIconFromFile(filepath.Join(installDir, clientExe)); err == nil {
+	if icon := LoadEmbeddedIcon(); icon != nil {
+		win.SetIcon(icon)
+	} else if icon, err := wui.NewIconFromFile(filepath.Join(installDir, clientExe)); err == nil {
 		win.SetIcon(icon)
 	}
 
