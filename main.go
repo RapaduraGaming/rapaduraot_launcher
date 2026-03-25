@@ -24,14 +24,16 @@ const (
 
 // uiEvent is sent from background goroutines to the UI update loop.
 type uiEvent struct {
-	status   string
-	progress float64 // -1 = hide bar, 0..1 = show bar with value
-	showPlay bool
+	status      string
+	progress    float64 // -1 = hide bar, 0..1 = show bar with value
+	showPlay    bool
+	showInstall bool
 }
 
 var (
 	installDir string
 	eventCh    = make(chan uiEvent, 32)
+	installCh  = make(chan struct{}, 1) // signals user confirmed installation
 )
 
 func main() {
@@ -81,6 +83,20 @@ func main() {
 		}()
 	})
 
+	installBtn := wui.NewButton()
+	installBtn.SetText("  INSTALAR  ")
+	installBtn.SetBounds((winW-120)/2, winH-60, 120, 36)
+	installBtn.SetVisible(false)
+	win.Add(installBtn)
+
+	installBtn.SetOnClick(func() {
+		installBtn.SetVisible(false)
+		select {
+		case installCh <- struct{}{}:
+		default:
+		}
+	})
+
 	win.SetOnMessage(func(window uintptr, msg uint32, wParam, lParam uintptr) (bool, uintptr) {
 		switch msg {
 		case w32.WM_CREATE:
@@ -119,6 +135,9 @@ func main() {
 						}
 						if ev.showPlay {
 							playBtn.SetVisible(true)
+						}
+						if ev.showInstall {
+							installBtn.SetVisible(true)
 						}
 					default:
 						return true, 0
@@ -162,6 +181,13 @@ func runLauncher() {
 	}
 
 	if !isClientInstalled(installDir) {
+		sendEvent(uiEvent{
+			status:      fmt.Sprintf("RapaduraOT v%s disponível.", info.Version),
+			progress:    -1,
+			showInstall: true,
+		})
+		<-installCh // wait for user to click install
+
 		sendEvent(uiEvent{
 			status:   fmt.Sprintf("Instalando RapaduraOT v%s...", info.Version),
 			progress: 0.01,
