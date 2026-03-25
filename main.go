@@ -25,7 +25,7 @@ const (
 // uiEvent is sent from background goroutines to the UI update loop.
 type uiEvent struct {
 	status   string
-	progress float64 // -1 = hide, 0..1 = show with value
+	progress float64 // -1 = hide bar, 0..1 = show bar with value
 	showPlay bool
 }
 
@@ -35,24 +35,15 @@ var (
 )
 
 func main() {
-	// Single-instance guard: only one launcher (or client) may be open.
 	h, ok := acquireSingleInstanceMutex()
 	if !ok {
 		return
 	}
 	defer windows.CloseHandle(h)
 
-	// Resolve install directory.
 	installDir = defaultInstallDir()
 
 	fonts, _ := wui.NewFont(wui.FontDesc{Name: "Segoe UI", Height: -13})
-	titleFont, _ := wui.NewFont(wui.FontDesc{Name: "Trajan Pro", Height: -20, Bold: true})
-	if titleFont == nil {
-		titleFont, _ = wui.NewFont(wui.FontDesc{Name: "Palatino Linotype", Height: -20, Bold: true})
-	}
-	if titleFont == nil {
-		titleFont, _ = wui.NewFont(wui.FontDesc{Name: "Georgia", Height: -20, Bold: true})
-	}
 
 	win := wui.NewWindow()
 	win.SetTitle(windowTitle + " Launcher")
@@ -61,14 +52,10 @@ func main() {
 	win.SetHasMaxButton(false)
 	win.SetFont(fonts)
 
-	// Try to set the window icon from the installed client exe, falling back to
-	// a relative path during development.
 	if icon, err := wui.NewIconFromFile(filepath.Join(installDir, clientExe)); err == nil {
 		win.SetIcon(icon)
 	}
 
-	// Leave room at top for the logo (drawn in WM_ERASEBKGND).
-	// Layout: logo occupies ~top third, controls sit in the lower two thirds.
 	const logoH = winH / 3
 
 	statusLbl := wui.NewLabel()
@@ -76,12 +63,6 @@ func main() {
 	statusLbl.SetBounds(20, logoH+20, winW-40, 22)
 	statusLbl.SetAlignment(wui.AlignCenter)
 	win.Add(statusLbl)
-
-	progressLbl := wui.NewLabel()
-	progressLbl.SetBounds(20, logoH+46, winW-40, 18)
-	progressLbl.SetAlignment(wui.AlignCenter)
-	progressLbl.SetVisible(false)
-	win.Add(progressLbl)
 
 	playBtn := wui.NewButton()
 	playBtn.SetText("  JOGAR  ")
@@ -93,8 +74,7 @@ func main() {
 		playBtn.SetVisible(false)
 		statusLbl.SetText("Abrindo RapaduraOT...")
 		go func() {
-			clientPath := filepath.Join(installDir, clientExe)
-			waitForClientWindow(clientPath)
+			waitForClientWindow(filepath.Join(installDir, clientExe))
 			win.Close()
 		}()
 	})
@@ -102,7 +82,7 @@ func main() {
 	win.SetOnMessage(func(window uintptr, msg uint32, wParam, lParam uintptr) (bool, uintptr) {
 		switch msg {
 		case w32.WM_CREATE:
-			initUI(installDir)
+			initUI(w32.HWND(window))
 			w32.SetTimer(w32.HWND(window), timerID, timerMs, 0)
 			go runLauncher()
 			return false, 0
@@ -123,18 +103,17 @@ func main() {
 
 		case w32.WM_TIMER:
 			if wParam == timerID {
+				tickAnimation()
 				for {
 					select {
 					case ev := <-eventCh:
 						if ev.status != "" {
 							statusLbl.SetText(ev.status)
 						}
-						switch {
-						case ev.progress < 0:
-							progressLbl.SetVisible(false)
-						case ev.progress > 0:
-							progressLbl.SetText(fmt.Sprintf("[%.0f%%]", ev.progress*100))
-							progressLbl.SetVisible(true)
+						if ev.progress < 0 {
+							setProgress(-1)
+						} else if ev.progress > 0 {
+							setProgress(ev.progress)
 						}
 						if ev.showPlay {
 							playBtn.SetVisible(true)
@@ -159,15 +138,12 @@ func sendEvent(ev uiEvent) {
 }
 
 func runLauncher() {
-	// Ensure the launcher exe is present in the install directory so shortcuts
-	// point to a stable path.
 	selfInstall(installDir)
 
 	localVer := readLocalVersion(filepath.Join(installDir, versionFile))
 
 	info, err := fetchVersionInfo(apiBase)
 	if err != nil {
-		// API unreachable: let the user play with whatever is installed.
 		if isClientInstalled(installDir) {
 			sendEvent(uiEvent{
 				status:   fmt.Sprintf("v%s - Pronto para jogar", localVer),
@@ -183,7 +159,6 @@ func runLauncher() {
 		return
 	}
 
-	// First-run installation: client not present yet.
 	if !isClientInstalled(installDir) {
 		sendEvent(uiEvent{
 			status:   fmt.Sprintf("Instalando RapaduraOT v%s...", info.Version),
@@ -208,7 +183,6 @@ func runLauncher() {
 		return
 	}
 
-	// Update check: version mismatch OR RSA key hash mismatch.
 	if !needsUpdate(info, installDir) {
 		sendEvent(uiEvent{
 			status:   fmt.Sprintf("v%s - Pronto para jogar", info.Version),
