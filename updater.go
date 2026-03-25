@@ -17,10 +17,12 @@ import (
 
 // VersionInfo is the response from GET /api/v1/client/version.
 type VersionInfo struct {
-	Version     string `json:"version"`
-	DownloadURL string `json:"downloadUrl"`
-	Checksum    string `json:"checksum"`  // "sha256:<hex>" or empty to skip
-	RSAKeyHash  string `json:"rsaKeyHash"` // SHA256 of the expected OTSERV_RSA value
+	Version         string `json:"version"`
+	DownloadURL     string `json:"downloadUrl"`
+	Checksum        string `json:"checksum"`        // "sha256:<hex>" or empty to skip
+	RSAKeyHash      string `json:"rsaKeyHash"`      // SHA256 of the expected OTSERV_RSA value
+	LauncherVersion string `json:"launcherVersion"` // latest launcher version
+	LauncherURL     string `json:"launcherUrl"`     // direct URL to new RapaduraOTLauncher.exe
 }
 
 func fetchVersionInfo(apiBase string) (*VersionInfo, error) {

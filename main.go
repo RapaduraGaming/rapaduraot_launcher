@@ -10,10 +10,11 @@ import (
 )
 
 const (
-	clientExe   = "RapaduraOT_dx_x64.exe"
-	versionFile = "version.txt"
-	apiBase     = "https://api.rapadura.org"
-	windowTitle = "RapaduraOT"
+	clientExe      = "RapaduraOT_dx_x64.exe"
+	versionFile    = "version.txt"
+	apiBase        = "https://api.rapadura.org"
+	windowTitle    = "RapaduraOT"
+	launcherVersion = "0.1.0"
 
 	timerID = 1
 	timerMs = 120
@@ -24,16 +25,15 @@ const (
 
 // uiEvent is sent from background goroutines to the UI update loop.
 type uiEvent struct {
-	status      string
-	progress    float64 // -1 = hide bar, 0..1 = show bar with value
-	showPlay    bool
-	showInstall bool
+	status   string
+	progress float64 // -1 = hide bar, 0..1 = show bar with value
+	showPlay bool
 }
 
 var (
 	installDir string
 	eventCh    = make(chan uiEvent, 32)
-	installCh  = make(chan struct{}, 1) // signals user confirmed installation
+	cachedInfo *VersionInfo // fetched once during self-update check, reused in runLauncher
 )
 
 func main() {
@@ -44,6 +44,14 @@ func main() {
 	defer windows.CloseHandle(h)
 
 	installDir = defaultInstallDir()
+
+	// Self-update: check launcher version before showing any UI.
+	if info, err := fetchVersionInfo(apiBase); err == nil {
+		if checkAndApplySelfUpdate(info) {
+			return // process exits inside checkAndApplySelfUpdate
+		}
+		cachedInfo = info
+	}
 
 	fonts, _ := wui.NewFont(wui.FontDesc{Name: "Segoe UI", Height: -13})
 
@@ -78,34 +86,24 @@ func main() {
 		playBtn.SetVisible(false)
 		statusLbl.SetText("Abrindo RapaduraOT...")
 		go func() {
+			hideLauncherWindow()
+			addTrayIcon()
 			waitForClientWindow(filepath.Join(installDir, clientExe))
-			win.Close()
+			// Client closed - stay in tray; user controls via tray menu.
 		}()
-	})
-
-	installBtn := wui.NewButton()
-	installBtn.SetText("  INSTALAR  ")
-	installBtn.SetBounds((winW-120)/2, winH-60, 120, 36)
-	installBtn.SetVisible(false)
-	win.Add(installBtn)
-
-	installBtn.SetOnClick(func() {
-		installBtn.SetVisible(false)
-		select {
-		case installCh <- struct{}{}:
-		default:
-		}
 	})
 
 	win.SetOnMessage(func(window uintptr, msg uint32, wParam, lParam uintptr) (bool, uintptr) {
 		switch msg {
 		case w32.WM_CREATE:
 			initUI(w32.HWND(window))
+			initTray(w32.HWND(window))
 			w32.SetTimer(w32.HWND(window), timerID, timerMs, 0)
 			go runLauncher()
 			return false, 0
 
 		case w32.WM_DESTROY:
+			cleanupTray()
 			destroyUI()
 			return false, 0
 
@@ -118,6 +116,31 @@ func main() {
 
 		case w32.WM_CTLCOLORSTATIC:
 			return handleCtlColorStatic(wParam)
+
+		case WM_TRAYNOTIFY:
+			switch lParam {
+			case w32.WM_RBUTTONUP:
+				showTrayMenu()
+			case w32.WM_LBUTTONDBLCLK:
+				if isClientInstalled(installDir) {
+					go launchFromTray()
+				} else {
+					restoreLauncherWindow()
+				}
+			}
+			return true, 0
+
+		case w32.WM_COMMAND:
+			switch wParam & 0xFFFF {
+			case IDM_PLAY:
+				go launchFromTray()
+			case IDM_SHOW:
+				restoreLauncherWindow()
+			case IDM_EXIT:
+				removeTrayIcon()
+				w32.PostMessage(w32.HWND(window), w32.WM_CLOSE, 0, 0)
+			}
+			return true, 0
 
 		case w32.WM_TIMER:
 			if wParam == timerID {
@@ -135,9 +158,6 @@ func main() {
 						}
 						if ev.showPlay {
 							playBtn.SetVisible(true)
-						}
-						if ev.showInstall {
-							installBtn.SetVisible(true)
 						}
 					default:
 						return true, 0
@@ -158,38 +178,40 @@ func sendEvent(ev uiEvent) {
 	}
 }
 
+func launchFromTray() {
+	hideLauncherWindow()
+	waitForClientWindow(filepath.Join(installDir, clientExe))
+}
+
 func runLauncher() {
 	selfInstall(installDir)
 
 	localVer := readLocalVersion(filepath.Join(installDir, versionFile))
 
-	info, err := fetchVersionInfo(apiBase)
-	if err != nil {
-		if isClientInstalled(installDir) {
-			sendEvent(uiEvent{
-				status:   fmt.Sprintf("v%s - Pronto para jogar", localVer),
-				progress: -1,
-				showPlay: true,
-			})
-		} else {
-			sendEvent(uiEvent{
-				status:   "Servidor indisponível. Verifique sua conexão.",
-				progress: -1,
-			})
+	info := cachedInfo
+	if info == nil {
+		var err error
+		info, err = fetchVersionInfo(apiBase)
+		if err != nil {
+			if isClientInstalled(installDir) {
+				sendEvent(uiEvent{
+					status:   fmt.Sprintf("v%s - Pronto para jogar", localVer),
+					progress: -1,
+					showPlay: true,
+				})
+			} else {
+				sendEvent(uiEvent{
+					status:   "Servidor indisponível. Verifique sua conexão.",
+					progress: -1,
+				})
+			}
+			return
 		}
-		return
 	}
 
 	if !isClientInstalled(installDir) {
 		sendEvent(uiEvent{
-			status:      fmt.Sprintf("RapaduraOT v%s disponível.", info.Version),
-			progress:    -1,
-			showInstall: true,
-		})
-		<-installCh // wait for user to click install
-
-		sendEvent(uiEvent{
-			status:   fmt.Sprintf("Instalando RapaduraOT v%s...", info.Version),
+			status:   fmt.Sprintf("Baixando RapaduraOT v%s...", info.Version),
 			progress: 0.01,
 		})
 		if err := downloadAndInstall(info, installDir, func(pct float64) {
@@ -204,7 +226,7 @@ func runLauncher() {
 		writeLocalVersion(filepath.Join(installDir, versionFile), info.Version)
 		setupShortcuts(installDir)
 		sendEvent(uiEvent{
-			status:   fmt.Sprintf("v%s - Pronto para jogar", info.Version),
+			status:   fmt.Sprintf("v%s instalado! Quer jogar agora?", info.Version),
 			progress: -1,
 			showPlay: true,
 		})
@@ -221,7 +243,7 @@ func runLauncher() {
 	}
 
 	sendEvent(uiEvent{
-		status:   fmt.Sprintf("Baixando v%s...", info.Version),
+		status:   fmt.Sprintf("Atualizando para v%s...", info.Version),
 		progress: 0.01,
 	})
 
