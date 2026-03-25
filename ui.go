@@ -9,6 +9,7 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
+	"syscall"
 	"unsafe"
 
 	"github.com/gonutz/w32/v2"
@@ -28,10 +29,12 @@ var (
 	colProgress   = w32.COLORREF(0x0050C8FF) // golden amber
 	colShimmer    = w32.COLORREF(0x00D0F8FF) // light shimmer
 	colTrack      = w32.COLORREF(0x00182030) // dark bar track
+	colBtnBg      = w32.COLORREF(0x00302010) // dark button background
 )
 
 var (
 	bgBrush    w32.HBRUSH
+	btnBrush   w32.HBRUSH
 	logoBitmap w32.HBITMAP
 	logoWidth  int
 	logoHeight int
@@ -57,6 +60,7 @@ func initUI(hwnd w32.HWND) {
 		logoBitmap, logoWidth, logoHeight = imageToHBITMAP(img)
 	}
 	bgBrush = w32.CreateSolidBrush(uint32(colBackground))
+	btnBrush = w32.CreateSolidBrush(uint32(colBtnBg))
 }
 
 // LoadEmbeddedIcon writes the embedded icon to a temp file and returns a
@@ -77,9 +81,97 @@ func destroyUI() {
 	if bgBrush != 0 {
 		w32.DeleteObject(w32.HGDIOBJ(bgBrush))
 	}
+	if btnBrush != 0 {
+		w32.DeleteObject(w32.HGDIOBJ(btnBrush))
+	}
 	if logoBitmap != 0 {
 		w32.DeleteObject(w32.HGDIOBJ(logoBitmap))
 	}
+}
+
+// drawItemStruct mirrors DRAWITEMSTRUCT from winuser.h (64-bit layout).
+type drawItemStruct struct {
+	CtlType    uint32
+	CtlID      uint32
+	ItemID     uint32
+	ItemAction uint32
+	ItemState  uint32
+	HwndItem   w32.HWND // Go aligns to 8 bytes, matching Win32 layout
+	Hdc        w32.HDC
+	RcItem     w32.RECT
+	ItemData   uintptr
+}
+
+const (
+	bsOwnerdraw  = int32(0x0000000B)
+	odsSelected  = uint32(0x0001)
+	dtCenter     = uint32(0x00000001)
+	dtVcenter    = uint32(0x00000004)
+	dtSingleLine = uint32(0x00000020)
+)
+
+var procDrawText = syscall.NewLazyDLL("user32.dll").NewProc("DrawTextW")
+
+func makeButtonOwnerdraw(hwnd w32.HWND) {
+	style := w32.GetWindowLong(hwnd, w32.GWL_STYLE)
+	w32.SetWindowLong(hwnd, w32.GWL_STYLE, style|bsOwnerdraw)
+}
+
+func handleDrawItem(lParam uintptr, installHWND, playHWND w32.HWND) (bool, uintptr) {
+	ds := (*drawItemStruct)(unsafe.Pointer(lParam))
+
+	var text string
+	switch ds.HwndItem {
+	case installHWND:
+		text = "INSTALAR"
+	case playHWND:
+		text = "JOGAR"
+	default:
+		return false, 0
+	}
+
+	hdc := ds.Hdc
+	rc := ds.RcItem
+	selected := ds.ItemState&odsSelected != 0
+
+	bgColor := colBtnBg
+	if selected {
+		bgColor = w32.COLORREF(0x00100808)
+	}
+	bg := w32.CreateSolidBrush(uint32(bgColor))
+	w32.FillRect(hdc, &rc, bg)
+	w32.DeleteObject(w32.HGDIOBJ(bg))
+
+	// 1px amber border
+	border := w32.CreateSolidBrush(uint32(colProgress))
+	sides := []w32.RECT{
+		{Left: rc.Left, Top: rc.Top, Right: rc.Right, Bottom: rc.Top + 1},
+		{Left: rc.Left, Top: rc.Bottom - 1, Right: rc.Right, Bottom: rc.Bottom},
+		{Left: rc.Left, Top: rc.Top, Right: rc.Left + 1, Bottom: rc.Bottom},
+		{Left: rc.Right - 1, Top: rc.Top, Right: rc.Right, Bottom: rc.Bottom},
+	}
+	for i := range sides {
+		w32.FillRect(hdc, &sides[i], border)
+	}
+	w32.DeleteObject(w32.HGDIOBJ(border))
+
+	w32.SetTextColor(hdc, colText)
+	w32.SetBkMode(hdc, w32.TRANSPARENT)
+	textRC := rc
+	if selected {
+		textRC.Left++
+		textRC.Top++
+	}
+	ptr, _ := syscall.UTF16PtrFromString(text)
+	procDrawText.Call(
+		uintptr(hdc),
+		uintptr(unsafe.Pointer(ptr)),
+		^uintptr(0),
+		uintptr(unsafe.Pointer(&textRC)),
+		uintptr(dtCenter|dtVcenter|dtSingleLine),
+	)
+
+	return true, 1
 }
 
 func setProgress(v float64) {

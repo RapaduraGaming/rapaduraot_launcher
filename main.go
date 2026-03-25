@@ -20,19 +20,21 @@ const (
 	timerMs = 120
 
 	winW = 460
-	winH = 300
+	winH = 320
 )
 
 // uiEvent is sent from background goroutines to the UI update loop.
 type uiEvent struct {
-	status   string
-	progress float64 // -1 = hide bar, 0..1 = show bar with value
-	showPlay bool
+	status      string
+	progress    float64 // -1 = hide bar, 0..1 = show bar with value
+	showPlay    bool
+	showInstall bool
 }
 
 var (
 	installDir string
 	eventCh    = make(chan uiEvent, 32)
+	installCh  = make(chan struct{}, 1)
 	cachedInfo *VersionInfo // fetched once during self-update check, reused in runLauncher
 )
 
@@ -72,13 +74,27 @@ func main() {
 
 	statusLbl := wui.NewLabel()
 	statusLbl.SetText("Verificando atualizações...")
-	statusLbl.SetBounds(20, logoH+20, winW-40, 22)
+	statusLbl.SetBounds(20, logoH+35, winW-40, 22)
 	statusLbl.SetAlignment(wui.AlignCenter)
 	win.Add(statusLbl)
 
+	installBtn := wui.NewButton()
+	installBtn.SetText("  INSTALAR  ")
+	installBtn.SetBounds((winW-140)/2, winH-95, 140, 36)
+	installBtn.SetVisible(false)
+	win.Add(installBtn)
+
+	installBtn.SetOnClick(func() {
+		installBtn.SetVisible(false)
+		select {
+		case installCh <- struct{}{}:
+		default:
+		}
+	})
+
 	playBtn := wui.NewButton()
 	playBtn.SetText("  JOGAR  ")
-	playBtn.SetBounds((winW-120)/2, winH-60, 120, 36)
+	playBtn.SetBounds((winW-120)/2, winH-95, 120, 36)
 	playBtn.SetVisible(false)
 	win.Add(playBtn)
 
@@ -97,6 +113,8 @@ func main() {
 		switch msg {
 		case w32.WM_CREATE:
 			initUI(w32.HWND(window))
+			makeButtonOwnerdraw(w32.HWND(installBtn.Handle()))
+			makeButtonOwnerdraw(w32.HWND(playBtn.Handle()))
 			initTray(w32.HWND(window))
 			w32.SetTimer(w32.HWND(window), timerID, timerMs, 0)
 			go runLauncher()
@@ -117,6 +135,9 @@ func main() {
 		case w32.WM_CTLCOLORSTATIC:
 			return handleCtlColorStatic(wParam)
 
+		case 0x002B: // WM_DRAWITEM
+			return handleDrawItem(lParam, w32.HWND(installBtn.Handle()), w32.HWND(playBtn.Handle()))
+
 		case WM_TRAYNOTIFY:
 			switch lParam {
 			case w32.WM_RBUTTONUP:
@@ -134,13 +155,15 @@ func main() {
 			switch wParam & 0xFFFF {
 			case IDM_PLAY:
 				go launchFromTray()
+				return true, 0
 			case IDM_SHOW:
 				restoreLauncherWindow()
+				return true, 0
 			case IDM_EXIT:
 				removeTrayIcon()
 				w32.PostMessage(w32.HWND(window), w32.WM_CLOSE, 0, 0)
+				return true, 0
 			}
-			return true, 0
 
 		case w32.WM_TIMER:
 			if wParam == timerID {
@@ -155,6 +178,9 @@ func main() {
 							setProgress(-1)
 						} else if ev.progress > 0 {
 							setProgress(ev.progress)
+						}
+						if ev.showInstall {
+							installBtn.SetVisible(true)
 						}
 						if ev.showPlay {
 							playBtn.SetVisible(true)
@@ -210,6 +236,12 @@ func runLauncher() {
 	}
 
 	if !isClientInstalled(installDir) {
+		sendEvent(uiEvent{
+			status:      fmt.Sprintf("RapaduraOT v%s disponível. Deseja instalar?", info.Version),
+			progress:    -1,
+			showInstall: true,
+		})
+		<-installCh
 		sendEvent(uiEvent{
 			status:   fmt.Sprintf("Baixando RapaduraOT v%s...", info.Version),
 			progress: 0.01,

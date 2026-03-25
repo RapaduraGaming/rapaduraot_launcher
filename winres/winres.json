@@ -1,7 +1,13 @@
 {
   "RT_GROUP_ICON": {
     "IDI_ICON": {
-      "0000": ["icon.ico"]
+      "0000": [
+        "icon_16.png",
+        "icon_32.png",
+        "icon_48.png",
+        "icon_64.png",
+        "icon_128.png"
+      ]
     }
   },
   "RT_MANIFEST": {
