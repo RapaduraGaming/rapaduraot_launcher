@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -18,7 +19,8 @@ import (
 type VersionInfo struct {
 	Version     string `json:"version"`
 	DownloadURL string `json:"downloadUrl"`
-	Checksum    string `json:"checksum"` // "sha256:<hex>" or empty to skip
+	Checksum    string `json:"checksum"`  // "sha256:<hex>" or empty to skip
+	RSAKeyHash  string `json:"rsaKeyHash"` // SHA256 of the expected OTSERV_RSA value
 }
 
 func fetchVersionInfo(apiBase string) (*VersionInfo, error) {
@@ -38,6 +40,46 @@ func fetchVersionInfo(apiBase string) (*VersionInfo, error) {
 		return nil, err
 	}
 	return &info, nil
+}
+
+// needsUpdate returns true if the installed version differs from info.Version
+// OR if the installed RSA key hash doesn't match info.RSAKeyHash.
+func needsUpdate(info *VersionInfo, installDir string) bool {
+	if info.Version != readLocalVersion(filepath.Join(installDir, versionFile)) {
+		return true
+	}
+	if info.RSAKeyHash != "" {
+		localHash := hashInstalledRSAKey(installDir)
+		return localHash != info.RSAKeyHash
+	}
+	return false
+}
+
+// hashInstalledRSAKey reads modules/gamelib/const.lua from the installed client,
+// extracts the OTSERV_RSA value, and returns its SHA256 hex hash.
+func hashInstalledRSAKey(installDir string) string {
+	constPath := filepath.Join(installDir, "modules", "gamelib", "const.lua")
+	data, err := os.ReadFile(constPath)
+	if err != nil {
+		return ""
+	}
+
+	// Match OTSERV_RSA = '...' spanning multiple concatenated string literals.
+	re := regexp.MustCompile(`(?s)OTSERV_RSA\s*=\s*'([^']+)'(?:\s*\.\.\s*'([^']+)')*`)
+	m := re.FindString(string(data))
+	if m == "" {
+		return ""
+	}
+
+	// Extract and join all quoted parts.
+	parts := regexp.MustCompile(`'([^']+)'`).FindAllStringSubmatch(m, -1)
+	var rsaVal strings.Builder
+	for _, p := range parts {
+		rsaVal.WriteString(p[1])
+	}
+
+	h := sha256.Sum256([]byte(rsaVal.String()))
+	return hex.EncodeToString(h[:])
 }
 
 func readLocalVersion(path string) string {
@@ -115,7 +157,6 @@ func downloadWithProgress(url, dest string, progress func(float64)) error {
 
 func verifyChecksum(path, expected string) error {
 	expected = strings.TrimPrefix(expected, "sha256:")
-
 	f, err := os.Open(path)
 	if err != nil {
 		return err
@@ -151,10 +192,9 @@ func extractZip(src, dest string) error {
 			continue
 		}
 
-		// Sanitize path to prevent zip-slip.
 		target := filepath.Join(dest, filepath.Clean("/"+f.Name))
 		if !strings.HasPrefix(target, filepath.Clean(dest)+string(os.PathSeparator)) {
-			continue
+			continue // zip-slip guard
 		}
 
 		if f.FileInfo().IsDir() {
