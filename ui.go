@@ -41,14 +41,22 @@ var (
 	animTick      int
 )
 
+// colorrefFromImage returns a COLORREF (0x00BBGGRR) for pixel (x, y) in img.
+func colorrefFromImage(img image.Image, x, y int) w32.COLORREF {
+	r, g, b, _ := img.At(x, y).RGBA()
+	return w32.COLORREF(uint32(b>>8)<<16 | uint32(g>>8)<<8 | uint32(r>>8))
+}
+
 func initUI(hwnd w32.HWND) {
 	progressHWND = hwnd
-	bgBrush = w32.CreateSolidBrush(uint32(colBackground))
 
 	img, err := png.Decode(bytes.NewReader(logoBytes))
 	if err == nil {
+		// Sample logo corner to match window background color exactly.
+		colBackground = colorrefFromImage(img, 0, 0)
 		logoBitmap, logoWidth, logoHeight = imageToHBITMAP(img)
 	}
+	bgBrush = w32.CreateSolidBrush(uint32(colBackground))
 }
 
 // LoadEmbeddedIcon writes the embedded icon to a temp file and returns a
