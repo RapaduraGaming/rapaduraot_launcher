@@ -154,7 +154,7 @@ func runLauncher() {
 			})
 		} else {
 			sendEvent(uiEvent{
-				status:   "Sem conexão. Instale o jogo primeiro.",
+				status:   "Servidor indisponível. Verifique sua conexão.",
 				progress: -1,
 			})
 		}
