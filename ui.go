@@ -117,7 +117,7 @@ func makeButtonOwnerdraw(hwnd w32.HWND) {
 	w32.SetWindowLong(hwnd, w32.GWL_STYLE, style|bsOwnerdraw)
 }
 
-func handleDrawItem(lParam uintptr, installHWND, playHWND w32.HWND) (bool, uintptr) {
+func handleDrawItem(lParam uintptr, installHWND, playHWND, retryHWND w32.HWND) (bool, uintptr) {
 	ds := (*drawItemStruct)(unsafe.Pointer(lParam))
 
 	var text string
@@ -126,6 +126,8 @@ func handleDrawItem(lParam uintptr, installHWND, playHWND w32.HWND) (bool, uintp
 		text = "INSTALAR"
 	case playHWND:
 		text = "JOGAR"
+	case retryHWND:
+		text = "TENTAR NOVAMENTE"
 	default:
 		return false, 0
 	}

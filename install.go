@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"syscall"
 )
 
 // defaultInstallDir returns the standard installation directory for the game client.
@@ -79,5 +80,7 @@ func createShortcut(lnkPath, targetPath, iconPath string) {
 			`$s.Save()`,
 		lnkPath, targetPath, iconPath,
 	)
-	exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", script).Run()
+	cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", script)
+	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: 0x08000000}
+	cmd.Run()
 }

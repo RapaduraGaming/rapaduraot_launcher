@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"syscall"
 	"time"
 )
 
@@ -47,7 +48,9 @@ func checkAndApplySelfUpdate(info *VersionInfo) bool {
 		return false
 	}
 
-	exec.Command("cmd", "/c", "start", "", "/b", batPath).Start()
+	updateCmd := exec.Command("cmd", "/c", "start", "", "/b", batPath)
+	updateCmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	updateCmd.Start()
 	os.Exit(0)
 	return true
 }

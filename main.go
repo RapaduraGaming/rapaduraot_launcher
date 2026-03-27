@@ -13,7 +13,7 @@ const (
 	clientExe      = "RapaduraOT_dx_x64.exe"
 	versionFile    = "version.txt"
 	apiBase        = "https://api.rapadura.org"
-	windowTitle    = "RapaduraOT"
+	windowTitle    = "Rapadura OT"
 	launcherVersion = "0.1.0"
 
 	timerID = 1
@@ -29,13 +29,16 @@ type uiEvent struct {
 	progress    float64 // -1 = hide bar, 0..1 = show bar with value
 	showPlay    bool
 	showInstall bool
+	showRetry   bool
 }
 
 var (
-	installDir string
-	eventCh    = make(chan uiEvent, 32)
-	installCh  = make(chan struct{}, 1)
-	cachedInfo *VersionInfo // fetched once during self-update check, reused in runLauncher
+	installDir     string
+	currentVersion string
+	eventCh        = make(chan uiEvent, 32)
+	installCh      = make(chan struct{}, 1)
+	retryCh        = make(chan struct{}, 1)
+	cachedInfo     *VersionInfo // fetched once during self-update check, reused in runLauncher
 )
 
 func main() {
@@ -78,9 +81,24 @@ func main() {
 	statusLbl.SetAlignment(wui.AlignCenter)
 	win.Add(statusLbl)
 
+	footerFont, _ := wui.NewFont(wui.FontDesc{Name: "Segoe UI", Height: -11})
+	footerLbl := wui.NewLabel()
+	footerLbl.SetText("Estamos em construção! Seu feedback é muito importante.")
+	footerLbl.SetFont(footerFont)
+	footerLbl.SetBounds(10, winH-80, winW-20, 14)
+	footerLbl.SetAlignment(wui.AlignCenter)
+	win.Add(footerLbl)
+
+	footerLinkLbl := wui.NewLabel()
+	footerLinkLbl.SetText("Acesse ot.rapadura.org")
+	footerLinkLbl.SetFont(footerFont)
+	footerLinkLbl.SetBounds(10, winH-65, winW-20, 14)
+	footerLinkLbl.SetAlignment(wui.AlignCenter)
+	win.Add(footerLinkLbl)
+
 	installBtn := wui.NewButton()
 	installBtn.SetText("  INSTALAR  ")
-	installBtn.SetBounds((winW-140)/2, winH-95, 140, 36)
+	installBtn.SetBounds((winW-140)/2, winH-135, 140, 36)
 	installBtn.SetVisible(false)
 	win.Add(installBtn)
 
@@ -94,7 +112,7 @@ func main() {
 
 	playBtn := wui.NewButton()
 	playBtn.SetText("  JOGAR  ")
-	playBtn.SetBounds((winW-120)/2, winH-95, 120, 36)
+	playBtn.SetBounds((winW-120)/2, winH-135, 120, 36)
 	playBtn.SetVisible(false)
 	win.Add(playBtn)
 
@@ -105,8 +123,26 @@ func main() {
 			hideLauncherWindow()
 			addTrayIcon()
 			waitForClientWindow(filepath.Join(installDir, clientExe))
-			// Client closed - stay in tray; user controls via tray menu.
+			sendEvent(uiEvent{
+				status:   fmt.Sprintf("v%s - Pronto para jogar", currentVersion),
+				progress: -1,
+				showPlay: true,
+			})
 		}()
+	})
+
+	retryBtn := wui.NewButton()
+	retryBtn.SetText("  TENTAR NOVAMENTE  ")
+	retryBtn.SetBounds((winW-190)/2, winH-135, 190, 36)
+	retryBtn.SetVisible(false)
+	win.Add(retryBtn)
+
+	retryBtn.SetOnClick(func() {
+		retryBtn.SetVisible(false)
+		select {
+		case retryCh <- struct{}{}:
+		default:
+		}
 	})
 
 	win.SetOnMessage(func(window uintptr, msg uint32, wParam, lParam uintptr) (bool, uintptr) {
@@ -115,6 +151,7 @@ func main() {
 			initUI(w32.HWND(window))
 			makeButtonOwnerdraw(w32.HWND(installBtn.Handle()))
 			makeButtonOwnerdraw(w32.HWND(playBtn.Handle()))
+			makeButtonOwnerdraw(w32.HWND(retryBtn.Handle()))
 			initTray(w32.HWND(window))
 			w32.SetTimer(w32.HWND(window), timerID, timerMs, 0)
 			go runLauncher()
@@ -136,18 +173,14 @@ func main() {
 			return handleCtlColorStatic(wParam)
 
 		case 0x002B: // WM_DRAWITEM
-			return handleDrawItem(lParam, w32.HWND(installBtn.Handle()), w32.HWND(playBtn.Handle()))
+			return handleDrawItem(lParam, w32.HWND(installBtn.Handle()), w32.HWND(playBtn.Handle()), w32.HWND(retryBtn.Handle()))
 
 		case WM_TRAYNOTIFY:
 			switch lParam {
 			case w32.WM_RBUTTONUP:
 				showTrayMenu()
 			case w32.WM_LBUTTONDBLCLK:
-				if isClientInstalled(installDir) {
-					go launchFromTray()
-				} else {
-					restoreLauncherWindow()
-				}
+				restoreLauncherWindow()
 			}
 			return true, 0
 
@@ -185,6 +218,9 @@ func main() {
 						if ev.showPlay {
 							playBtn.SetVisible(true)
 						}
+						if ev.showRetry {
+							retryBtn.SetVisible(true)
+						}
 					default:
 						return true, 0
 					}
@@ -207,6 +243,11 @@ func sendEvent(ev uiEvent) {
 func launchFromTray() {
 	hideLauncherWindow()
 	waitForClientWindow(filepath.Join(installDir, clientExe))
+	sendEvent(uiEvent{
+		status:   fmt.Sprintf("v%s - Pronto para jogar", currentVersion),
+		progress: -1,
+		showPlay: true,
+	})
 }
 
 func runLauncher() {
@@ -220,6 +261,7 @@ func runLauncher() {
 		info, err = fetchVersionInfo(apiBase)
 		if err != nil {
 			if isClientInstalled(installDir) {
+				currentVersion = localVer
 				sendEvent(uiEvent{
 					status:   fmt.Sprintf("v%s - Pronto para jogar", localVer),
 					progress: -1,
@@ -246,17 +288,30 @@ func runLauncher() {
 			status:   fmt.Sprintf("Baixando RapaduraOT v%s...", info.Version),
 			progress: 0.01,
 		})
-		if err := downloadAndInstall(info, installDir, func(pct float64) {
-			sendEvent(uiEvent{progress: pct})
-		}); err != nil {
+		for {
 			sendEvent(uiEvent{
-				status:   "Erro ao instalar. Verifique sua conexão.",
-				progress: -1,
+				status:   fmt.Sprintf("Baixando RapaduraOT v%s...", info.Version),
+				progress: 0.01,
 			})
-			return
+			err := downloadAndInstall(info, installDir, func(pct float64) {
+				sendEvent(uiEvent{
+					status:   fmt.Sprintf("Baixando RapaduraOT v%s... %.0f%%", info.Version, pct*100),
+					progress: pct,
+				})
+			})
+			if err == nil {
+				break
+			}
+			sendEvent(uiEvent{
+				status:    "Erro ao instalar. Verifique sua conexão.",
+				progress:  -1,
+				showRetry: true,
+			})
+			<-retryCh
 		}
 		writeLocalVersion(filepath.Join(installDir, versionFile), info.Version)
 		setupShortcuts(installDir)
+		currentVersion = info.Version
 		sendEvent(uiEvent{
 			status:   fmt.Sprintf("v%s instalado! Quer jogar agora?", info.Version),
 			progress: -1,
@@ -266,6 +321,7 @@ func runLauncher() {
 	}
 
 	if !needsUpdate(info, installDir) {
+		currentVersion = info.Version
 		sendEvent(uiEvent{
 			status:   fmt.Sprintf("v%s - Pronto para jogar", info.Version),
 			progress: -1,
@@ -274,23 +330,30 @@ func runLauncher() {
 		return
 	}
 
-	sendEvent(uiEvent{
-		status:   fmt.Sprintf("Atualizando para v%s...", info.Version),
-		progress: 0.01,
-	})
-
-	if err := downloadAndInstall(info, installDir, func(pct float64) {
-		sendEvent(uiEvent{progress: pct})
-	}); err != nil {
+	for {
 		sendEvent(uiEvent{
-			status:   "Erro ao atualizar. Verifique sua conexão.",
-			progress: -1,
-			showPlay: true,
+			status:   fmt.Sprintf("Atualizando para v%s...", info.Version),
+			progress: 0.01,
 		})
-		return
+		err := downloadAndInstall(info, installDir, func(pct float64) {
+			sendEvent(uiEvent{
+				status:   fmt.Sprintf("Atualizando para v%s... %.0f%%", info.Version, pct*100),
+				progress: pct,
+			})
+		})
+		if err == nil {
+			break
+		}
+		sendEvent(uiEvent{
+			status:    "Erro ao atualizar. Verifique sua conexão.",
+			progress:  -1,
+			showRetry: true,
+		})
+		<-retryCh
 	}
 
 	writeLocalVersion(filepath.Join(installDir, versionFile), info.Version)
+	currentVersion = info.Version
 	sendEvent(uiEvent{
 		status:   fmt.Sprintf("v%s - Pronto para jogar", info.Version),
 		progress: -1,
