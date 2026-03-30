@@ -88,6 +88,14 @@ O launcher consulta a API em `https://api.rapadura.org/api/v1/client/version` pa
 | `launcherVersion` | Versao mais recente do launcher |
 | `launcherUrl` | URL do novo launcher (para auto-atualizacao) |
 
+## Privacidade
+
+O RapaduraOT Launcher **nao coleta, armazena ou transmite dados pessoais**. A unica comunicacao de rede realizada e com `api.rapadura.org` para verificar atualizacoes e baixar o cliente do jogo. Nao ha analytics, rastreamento ou telemetria de qualquer tipo.
+
+## Code Signing
+
+Os binarios de release sao assinados digitalmente via [SignPath Foundation](https://signpath.org/) para projetos open source. Somente mantenedores autorizados da organizacao [RapaduraGaming](https://github.com/RapaduraGaming) podem aprovar releases para assinatura.
+
 ## Licenca
 
-Uso interno. Todos os direitos reservados.
+Este projeto e licenciado sob a [MIT License](LICENSE).
