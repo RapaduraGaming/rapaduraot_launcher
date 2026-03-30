@@ -14,9 +14,20 @@ Launcher oficial do [RapaduraOT](https://ot.rapadura.org), responsavel por insta
 
 ## Download
 
-Baixe a versao mais recente na pagina de [Releases](../../releases).
+Baixe a versao mais recente na pagina de [Releases](../../releases). Existem duas opcoes:
 
-Execute o `RapaduraOT-Setup.exe` para instalar, ou rode o `RapaduraOTLauncher.exe` diretamente.
+### Instalador (recomendado)
+
+Baixe o **`RapaduraOT-Setup.exe`** e execute. O instalador cuida de tudo:
+
+- Instala o launcher em `%LOCALAPPDATA%\RapaduraOT`
+- Cria atalho na area de trabalho
+- Cria entrada no menu iniciar
+- Registra no "Adicionar ou remover programas" do Windows para desinstalacao
+
+### ZIP portatil
+
+Baixe o **`RapaduraOTLauncher.zip`**, extraia e execute o `RapaduraOTLauncher.exe` diretamente. Na primeira execucao o launcher baixa o cliente automaticamente. Os atalhos nao sao criados nesse modo.
 
 ## Compilando
 
