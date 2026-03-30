@@ -10,7 +10,7 @@ echo Baixando dependencias...
 go mod tidy
 
 echo Compilando launcher...
-go build -ldflags="-H windowsgui -s -w" -o ..\RapaduraOTLauncher.exe .
+go build -ldflags="-H windowsgui -s -w" -o RapaduraOTLauncher.exe .
 
 if %ERRORLEVEL% == 0 (
     echo.

@@ -24,8 +24,8 @@ SetCompressor /SOLID lzma
 ; Interface
 ; -----------------------------------------------
 !define MUI_ABORTWARNING
-!define MUI_ICON   "..\src\otcicon.ico"
-!define MUI_UNICON "..\src\otcicon.ico"
+!define MUI_ICON   "..\winres\icon.ico"
+!define MUI_UNICON "..\winres\icon.ico"
 !define MUI_WELCOMEFINISHPAGE_BITMAP "welcome_sidebar.bmp"
 
 ; -----------------------------------------------
